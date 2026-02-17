@@ -86,18 +86,17 @@ class DAQ_2DViewer_OpenCV(DAQ_Viewer_base):
         initialized: bool
             False if initialization failed otherwise True
         """
-        if self.settings['controller_status'] == 'Master':
+        if self.is_master:
             if 'win' in platform:
-                new_controller = cv2.VideoCapture(self.settings['camera_index'], cv2.CAP_DSHOW)
+                self.controller = cv2.VideoCapture(self.settings['camera_index'], cv2.CAP_DSHOW)
             else:
-                new_controller = cv2.VideoCapture(self.settings['camera_index'])
+                self.controller = cv2.VideoCapture(self.settings['camera_index'])
                   # to add settable settings to the param list (but driver builtin settings window is prefered (OpenCVProp['CV_CAP_PROP_SETTINGS'])
-
-        self.ini_detector_init(old_controller=controller,
-                               new_controller=new_controller)
-
-        if self.settings['controller_status'] == 'Master':
             self.get_active_properties()
+
+        else:
+            self.controller = controller
+
 
         self.x_axis = self.get_xaxis()
         self.y_axis = self.get_yaxis()
