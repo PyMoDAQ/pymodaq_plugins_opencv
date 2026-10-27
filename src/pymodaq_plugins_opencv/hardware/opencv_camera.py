@@ -12,6 +12,7 @@ cameras. OpenCV cameras are simpler than most:
 
 Frames are given as RGB, the order of OpenCV being BGR.
 """
+import os
 import sys
 import threading
 import time
@@ -25,6 +26,18 @@ import numpy as np
 from pymodaq_plugins_utils.hardware.camera_driver import CameraDriverBase
 
 from pymodaq_plugins_opencv.hardware.opencv import OpenCVProp
+
+
+def _keep_qt_of_the_binding():
+    """The opencv-python package (not the headless one) points Qt to the platform plugins it ships, which makes the
+    creation of a QApplication abort with the Qt of PyQt/PySide: restore the plugins of the Qt binding"""
+    cv2_dir = os.path.dirname(os.path.abspath(cv2.__file__))
+    for name in ('QT_QPA_PLATFORM_PLUGIN_PATH', 'QT_QPA_FONTDIR'):
+        if os.environ.get(name, '').startswith(cv2_dir):
+            del os.environ[name]
+
+
+_keep_qt_of_the_binding()
 
 
 class OpenCVCamera(CameraDriverBase):
