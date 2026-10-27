@@ -116,12 +116,17 @@ def acquire(driver: OpenCVCamera, nframes=1) -> np.ndarray:
     return driver.read_multiple_images()
 
 
+def click_led(plugin, name: str):
+    """What the user does: press the (checkable) button of the parameter, which the DAQ_Viewer sends to the plugin"""
+    param = plugin.settings.child('roi', name)
+    param.opts['checked'] = True
+    param.activate()
+
+
 def apply_roi(plugin, rows: slice, columns: slice):
-    plugin.settings.child('roi', 'update_roi').setValue(True)
     plugin.roi_select(RoiInfo.from_slices([rows, columns]))
-    param = plugin.settings.child('roi', 'apply_roi')
-    param.setValue(True)
-    plugin.commit_settings(param)
+    click_led(plugin, 'update_roi')
+    click_led(plugin, 'apply_roi')
 
 
 class TestVideoFile:
