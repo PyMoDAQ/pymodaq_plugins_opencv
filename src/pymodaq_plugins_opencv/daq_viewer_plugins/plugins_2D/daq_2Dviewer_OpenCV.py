@@ -1,5 +1,3 @@
-from copy import deepcopy
-
 from pymodaq_utils.logger import set_logger, get_module_name
 from pymodaq_gui.parameter import Parameter
 
@@ -10,22 +8,6 @@ from pymodaq_plugins_utils.hardware.camera_base import CameraBase, cam_params
 from pymodaq_plugins_opencv.hardware.opencv_camera import OpenCVCamera
 
 logger = set_logger(get_module_name(__file__))
-
-
-def webcam_params() -> list:
-    """The settings of ``CameraBase`` that suit a webcam: colour image converted to gray by default, no exposure
-    time nor buffer (OpenCV sets neither, see ``Cam. Settings``)"""
-    params = deepcopy(cam_params)
-    for param in params:
-        if param['name'] == 'color_conversion':
-            param['value'] = 'RGB2GRAY'
-        elif param['name'] == 'buffer':
-            param['visible'] = False
-        elif param['name'] == 'timing_opts':
-            for child in param['children']:
-                if child['name'] == 'exposure_time':
-                    child['visible'] = False
-    return params
 
 
 class DAQ_2DViewer_OpenCV(CameraBase):
@@ -42,7 +24,14 @@ class DAQ_2DViewer_OpenCV(CameraBase):
              [{'title': 'Camera index:', 'name': 'camera_index', 'type': 'int', 'value': 0, 'default': 0, 'min': 0},
               {'title': 'Open Settings:', 'name': 'open_settings', 'type': 'bool', 'value': False},
               {'title': 'Cam. Settings:', 'name': 'cam_settings', 'type': 'group', 'children': []},
-              ] + webcam_params()
+              ] + cam_params
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # OpenCV sets neither the exposure time nor the buffer of CameraBase, and a colour image is shown in gray
+        self.settings.child('timing_opts', 'exposure_time').show(False)
+        self.settings.child('buffer').show(False)
+        self.settings.child('color_conversion').setOpts(value='RGB2GRAY', default='RGB2GRAY')
 
     def ini_detector_custom(self, controller=None):
         """Open the camera (master) or take the one of the master (slave)"""

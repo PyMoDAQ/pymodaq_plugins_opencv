@@ -1,6 +1,7 @@
 """The OpenCV camera driver and its plugin, without a webcam: a video file read by the real OpenCV, and a fake of
 ``cv2.VideoCapture`` for what a file cannot do (properties, failing reads, change of the frame size)"""
 import importlib.util
+import os
 import time
 
 import cv2
@@ -24,7 +25,7 @@ except ImportError:
 
 from pymodaq_plugins_utils.hardware.camera_driver import CameraDriverBase
 
-from pymodaq_plugins_opencv.hardware.opencv_camera import OpenCVCamera
+from pymodaq_plugins_opencv.hardware.opencv_camera import OpenCVCamera, _keep_qt_of_the_binding
 from pymodaq_plugins_opencv.daq_viewer_plugins.plugins_2D.daq_2Dviewer_OpenCV import DAQ_2DViewer_OpenCV
 
 WIDTH, HEIGHT = 64, 48
@@ -116,12 +117,27 @@ def acquire(driver: OpenCVCamera, nframes=1) -> np.ndarray:
     return driver.read_multiple_images()
 
 
+def click_led(plugin, name: str):
+    """What the user does: press the (checkable) button of the parameter, which the DAQ_Viewer sends to the plugin"""
+    param = plugin.settings.child('roi', name)
+    param.opts['checked'] = True
+    param.activate()
+
+
 def apply_roi(plugin, rows: slice, columns: slice):
-    plugin.settings.child('roi', 'update_roi').setValue(True)
     plugin.roi_select(RoiInfo.from_slices([rows, columns]))
-    param = plugin.settings.child('roi', 'apply_roi')
-    param.setValue(True)
-    plugin.commit_settings(param)
+    click_led(plugin, 'update_roi')
+    click_led(plugin, 'apply_roi')
+
+
+def test_the_qt_plugins_of_opencv_python_are_forgotten(monkeypatch):
+    cv2_qt = os.path.join(os.path.dirname(os.path.abspath(cv2.__file__)), 'qt', 'plugins')
+    monkeypatch.setenv('QT_QPA_PLATFORM_PLUGIN_PATH', cv2_qt)
+    _keep_qt_of_the_binding()
+    assert 'QT_QPA_PLATFORM_PLUGIN_PATH' not in os.environ
+    monkeypatch.setenv('QT_QPA_PLATFORM_PLUGIN_PATH', '/my/own/plugins')  # not the one of OpenCV: left alone
+    _keep_qt_of_the_binding()
+    assert os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] == '/my/own/plugins'
 
 
 class TestVideoFile:
