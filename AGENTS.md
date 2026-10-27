@@ -34,8 +34,8 @@ pytest                           # template tests (package structure, plugin che
 ```
 
 Installing PyMoDAQ itself is a separate matter. A plugin only needs the released packages (`pymodaq`,
-`pymodaq_utils`, `pymodaq_data`, `pymodaq_gui`, installed as dependencies). If you also have to modify them, work in a
-clone of the PyMoDAQ repository and install the four packages in editable mode with the script at its root, never with
+`pymodaq_utils`, `pymodaq_data`, `pymodaq_gui`, `pymodaq_scripting`, installed as dependencies). If you also have to modify
+them, work in a clone of the PyMoDAQ repository and install the five packages in editable mode with the script at its root, never with
 `pip install -e .` inside each package (the script handles the order and the options):
 
 ```bash
@@ -45,17 +45,29 @@ python install-packages.py -d -qt pyside6     # choose the Qt backend (pyqt5, py
 
 Do not consider a task finished until `check_plugin` and `pytest` pass. Do not invent PyMoDAQ APIs: if a method
 or attribute is not in the base classes (`DAQ_Move_base`, `DAQ_Viewer_base`, `CustomExt`) or in an existing
-plugin, look it up in the installed `pymodaq` package instead of guessing.
+plugin, look it up in the installed `pymodaq` package instead of guessing. The same holds for what you write: a comment,
+a docstring or a documentation sentence that says how PyMoDAQ behaves must come from reading the code that
+implements it, not from memory or from a guess. If you could not verify something, say so.
 
 ## 3. Instrument plugins
 
 File and class names must match: `daq_move_<Name>.py` holds `DAQ_Move_<Name>`; `daq_<N>Dviewer_<Name>.py` holds
 `DAQ_<N>DViewer_<Name>` (N = 0, 1, 2 or N). Each file ends with `if __name__ == '__main__': main(__file__)`.
 
-**Actuator** (`DAQ_Move_base`). Override at least, in the order of the template (the order in which to develop them),
-`ini_attributes`, `ini_stage`, `close`, `get_actuator_value`, `move_abs`, `move_rel`, `move_home`, `stop_motion`,
-`commit_settings`.
+**Actuator** (`DAQ_Move_base`). Required (`check_plugin` reports an error otherwise): `ini_stage`, `get_actuator_value`,
+`move_abs`, `move_rel` and `close`. Override too, when the instrument can do it: `ini_attributes`, `move_home`,
+`stop_motion` (`check_plugin` warns if it is missing), `commit_settings`. The template lists them in the order in which
+to develop them. The list is defined once in `pymodaq_utils.plugin_tools.contract`, with when each method is called and
+what it returns (table in the developer guide, "The methods of a plugin").
 
+- (Actuators and detectors.) A plugin that works on some systems only (a Windows driver, a Raspberry Pi board)
+  declares it in the instrument class, for instance `supported_platforms = ('win32',)` (values of `sys.platform`:
+  `win32`, `linux`, `darwin`) and optionally `supported_architectures = ('aarch64', 'armv7l')` (values of
+  `platform.machine()`). PyMoDAQ then refuses to initialize it elsewhere with a message. The `Operating System` and
+  `Programming Language :: Python :: 3.x` classifiers are computed when the package is built (`classifiers` is
+  dynamic in the `pyproject.toml`, the others are in `[tool.pymodaq] classifiers`). A plugin working on several
+  systems must stay importable on all of them: import Windows-only code lazily (PMQ317; not reported when every
+  instrument is `('win32',)`). Needs `pymodaq>=5.3.6`.
 - `ini_stage(controller=None)` returns `(info: str, initialized: bool)`. If `self.is_master`, create the controller;
   otherwise store the `controller` passed in (several axes share one controller).
 - Class attributes: `is_multiaxes`, `_axis_names`, `_controller_units`, `_epsilons`,
@@ -67,8 +79,8 @@ File and class names must match: `daq_move_<Name>.py` holds `DAQ_Move_<Name>`; `
 - Positions are `DataActuator` objects with **units** (`units=self.axis_unit`); use `check_bound`,
   `set_position_with_scaling` and `get_position_with_scaling` as in the template.
 
-**Detector** (`DAQ_Viewer_base`). Override at least, in the order of the template, `ini_attributes`, `ini_detector`,
-`close`, `grab_data`, `stop`, `commit_settings`.
+**Detector** (`DAQ_Viewer_base`). Required: `ini_detector`, `grab_data`, `stop` and `close`. Override too, when needed:
+`ini_attributes`, `commit_settings`. Same contract module as for the actuators.
 
 - `ini_detector(controller=None)` returns `(info, initialized)`, same master/slave logic.
 - `params = comon_parameters + [...]`.
@@ -92,6 +104,13 @@ File and class names must match: `daq_move_<Name>.py` holds `DAQ_Move_<Name>`; `
   of all the axes of a multiaxes controller.
 - Hardware access code goes in `hardware/`, behind a small wrapper class. This lets the plugin be tested with a
   mock controller and keeps the plugin file readable.
+- For the communication with the instrument, copy the matching recipe of the cookbook of
+  [`pymodaq_plugins_mockexamples`](https://github.com/PyMoDAQ/pymodaq_plugins_mockexamples#cookbook-of-device-patterns)
+  instead of writing it from memory: a text protocol with `pymeasure` (recommended), a serial line, VISA, a C library
+  with `ctypes`, a .NET assembly with `pythonnet`, a camera (ROI, binning, exposure, calibrated axes) or a
+  spectrometer (an axis that changes). Each recipe runs on a simulated device (leave the port to `MOCK`) and its file
+  header says what to copy, adapt and keep. The PyMoDAQ documentation page "Plugin cookbook"
+  (`docs/src/developer_folder/plugin_cookbook.rst`) lists them.
 - Defaults live in `resources/config_template.toml`, not in the code. Read configuration values through
   `GlobalConfig` from `pymodaq_utils.config`: a singleton that wraps the `Config` objects of all packages, e.g.
   `GlobalConfig()('gui', 'style', 'theme')`. Do not parse the toml files yourself, and do not instantiate a `Config`
@@ -119,6 +138,14 @@ and the deprecated `CustomApp` / `CustomExt` hooks `setup_docks` and `setup_menu
 `setup_menus_and_toolbars`).
 
 ## 4. Dashboard extensions (`CustomExt`)
+
+Structure: `CustomApp(QObject, ActionManager, ParameterManager)` gives actions with their toolbar/menu placement,
+the settings tree (`params`, `settings`, `value_changed`), the dock area, the status bar, `h5_manager` and
+`thread_manager`; `CustomExt(CustomApp)` adds `dashboard`, `modules_manager` and the Dashboard toolbar. A worker
+(`ExtensionWorker`) runs in its own thread with a `SaverWorker`; talk to workers with signals only. Two patterns: a standalone app
+(`CustomApp`, no instrument) or a Dashboard extension (`CustomExt`, any use of instruments); embedding control modules in
+a `CustomApp` is possible but not advised. They are drawn, with text versions, in the PyMoDAQ
+documentation page "CustomApp and CustomExt" (`docs/src/developer_folder/custom_app.rst`).
 
 - Entry point group `pymodaq.extensions` in `pyproject.toml`; each module in `extensions/` defines
   `EXTENSION_NAME` (menu label), `CLASS_NAME` (class name) and a class derived from `CustomExt`.
@@ -148,7 +175,10 @@ and the deprecated `CustomApp` / `CustomExt` hooks `setup_docks` and `setup_menu
   here.
 - Long-running work (a scan, a sequence, a ramp) goes in an `ExtensionWorker` subclass run in a thread, started and
   stopped from the extension's workflow actions, as in `sequencer.py` and `ramping.py`.
-- `__init__(self, parent: DockArea, dashboard)`: call `super().__init__(parent, dashboard)`, then `self.setup_ui()`.
+- `__init__(self, parent: DockArea, dashboard)`: call `super().__init__(parent, dashboard, add_toolbar_break=False)`,
+  then `self.setup_ui()`. An extension has two toolbars: its own, created by the base class (`CustomApp.__init__`,
+  `add_toolbar_break` is `True` by default), and the Dashboard one created by `create_dashboard_toolbar(add_break=False)`
+  in `setup_menus_and_toolbars`. The extensions of PyMoDAQ (scan, sequencer, ramping...) add a break before neither.
 - **Experiment and state belong to the Dashboard.** The *experiment* is the list of instruments (actuators and
   detectors) the Dashboard manages and controls; the *state* is the state of that experiment, mostly the values of the
   instruments' settings and of the Dashboard's actuators. An extension must use the managers it gets through its
@@ -164,6 +194,9 @@ and the deprecated `CustomApp` / `CustomExt` hooks `setup_docks` and `setup_menu
   (only creates the menus and toolbars), `setup_actions` (creates the actions and can put them in those menus and
   toolbars with `add_action(..., menu=..., toolbar=...)`), `connect_things`, then `value_changed`, `quit_fun`. `setup_docks` and `setup_menu` are deprecated. The GUI thread runs
   your code; react to module signals, never poll or sleep.
+- Status indicators (LEDs, icons) take their colours from `StatusPalette` / `Status` in
+  `pymodaq_gui/utils/status_palette.py` (off, idle, running, warning, error, critical), never from hard-coded colours.
+  `error` (orange) is an operation that failed and may recover, `critical` (red) an unrecoverable fault.
 
 ## 5. Standalone apps (`CustomApp`)
 
@@ -178,14 +211,14 @@ DataMixer (`DataMixerModel`) and the Sequencer (`ChoiceModelBase`). Write a mode
 extensions already does the job and only the conversion of the measurements or of the outputs is specific.
 
 - Set `models = true` in `[features]`; entry points are generated only then (`pymodaq.models`).
-- Create the `models/` folder at the root of the package, one model per module; the module name is the name shown in
-  the extension. The model is the class defined in the module that derives from the base class of the extension. It may
+- Put your models in the `models/` folder of the package (shipped empty), one model per module; the module name is the
+  name shown in the extension. The model is the class defined in the module that derives from the base class of the extension. It may
   derive from your own intermediate class, but PID and DataMixer only accepted a direct subclass of the generic base
   before the release that follows 5.3.3, so derive directly from it if you must support older releases. The Sequencer
   is the exception: it does not look at base classes, you register each choice model with
   `@ChoiceModelFactory.register_choice()`.
-- The template ships no model on purpose. Start from the working examples of
-  [`pymodaq_plugins_mockexamples`](https://github.com/PyMoDAQ/pymodaq_plugins_mockexamples) (`PIDModelBeamSteering`,
+- The template ships no model on purpose: the `models/` folder is empty, so that you know where to add yours. Start
+  from the working examples of [`pymodaq_plugins_mockexamples`](https://github.com/PyMoDAQ/pymodaq_plugins_mockexamples) (`PIDModelBeamSteering`,
   `PIDModelMockHeater`, `BayesianModelMock`, `DataMixerModelFit`; for the Sequencer, the choice models of
   `pymodaq/extensions/sequencer/models`) and from the page "Models of the extensions" of the PyMoDAQ
   documentation, which lists the methods to implement for each kind. Test a model with the mock actuators and
